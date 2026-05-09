@@ -1385,67 +1385,90 @@ function actStone() {
 }
 
 function canPlayerMoveTo(px, py) {
-  const tx = Math.floor((px + player.w / 2) / TILE);
-  const ty = Math.floor((py + player.h / 2) / TILE);
-  return isLandTile(tx, ty) && !isBlockedTile(tx, ty);
+  const cx = px + player.w / 2;
+  const cy = py + player.h / 2;
+  const tx = Math.floor(cx / TILE);
+  const ty = Math.floor(cy / TILE);
+
+  if (!isLandTile(tx, ty)) return false;
+
+  // Slightly larger probe points around the player make trunk collision less sticky.
+  const probe = 7;
+  const points = [
+    { x: cx, y: cy },
+    { x: cx - probe, y: cy },
+    { x: cx + probe, y: cy },
+    { x: cx, y: cy - probe },
+    { x: cx, y: cy + probe }
+  ];
+
+  return points.every(p => {
+    const ptx = Math.floor(p.x / TILE);
+    const pty = Math.floor(p.y / TILE);
+    return isLandTile(ptx, pty) && !isBlockedTile(ptx, pty);
+  });
 }
 
 function tryMoveWithSlide(dirX, dirY, speed) {
-  const nextX = player.x + dirX * speed;
-  const nextY = player.y + dirY * speed;
+  // Sub-step movement. This keeps the auto-slide alive even at low speed and
+  // prevents jumping from one side of a trunk collision to a stuck state.
+  const steps = Math.max(1, Math.ceil(speed / 0.65));
+  const stepSpeed = speed / steps;
 
-  if (canPlayerMoveTo(nextX, nextY)) {
-    player.x = nextX;
-    player.y = nextY;
-    return true;
-  }
+  let movedAny = false;
 
-  // First, try normal axis sliding.
-  let moved = false;
-  if (canPlayerMoveTo(nextX, player.y)) {
-    player.x = nextX;
-    moved = true;
-  }
-  if (canPlayerMoveTo(player.x, nextY)) {
-    player.y = nextY;
-    moved = true;
-  }
-  if (moved) return true;
+  for (let i = 0; i < steps; i++) {
+    const nextX = player.x + dirX * stepSpeed;
+    const nextY = player.y + dirY * stepSpeed;
 
-  // Then, when pushing into a trunk/corner head-on, softly search nearby
-  // perpendicular offsets so the character rounds the obstacle instead of sticking.
-  const perpendiculars = Math.abs(dirX) >= Math.abs(dirY)
-    ? [{ ox: 0, oy: -1 }, { ox: 0, oy: 1 }]
-    : [{ ox: -1, oy: 0 }, { ox: 1, oy: 0 }];
+    if (canPlayerMoveTo(nextX, nextY)) {
+      player.x = nextX;
+      player.y = nextY;
+      movedAny = true;
+      continue;
+    }
 
-  const slideSteps = [0.45, 0.75, 1.05, 1.35];
+    // Normal axis slide.
+    let moved = false;
+    if (canPlayerMoveTo(nextX, player.y)) {
+      player.x = nextX;
+      moved = true;
+    }
+    if (canPlayerMoveTo(player.x, nextY)) {
+      player.y = nextY;
+      moved = true;
+    }
+    if (moved) {
+      movedAny = true;
+      continue;
+    }
 
-  for (const step of slideSteps) {
-    for (const p of perpendiculars) {
-      const sx = player.x + dirX * speed * 0.62 + p.ox * speed * step;
-      const sy = player.y + dirY * speed * 0.62 + p.oy * speed * step;
+    // Head-on trunk/corner push: search both perpendicular directions.
+    const perpendiculars = Math.abs(dirX) >= Math.abs(dirY)
+      ? [{ ox: 0, oy: -1 }, { ox: 0, oy: 1 }]
+      : [{ ox: -1, oy: 0 }, { ox: 1, oy: 0 }];
 
-      if (canPlayerMoveTo(sx, sy)) {
-        player.x = sx;
-        player.y = sy;
-        return true;
+    let slid = false;
+    for (const amount of [0.65, 1.05, 1.45, 1.85, 2.30]) {
+      for (const p of perpendiculars) {
+        const sx = player.x + dirX * stepSpeed * 0.35 + p.ox * stepSpeed * amount;
+        const sy = player.y + dirY * stepSpeed * 0.35 + p.oy * stepSpeed * amount;
+
+        if (canPlayerMoveTo(sx, sy)) {
+          player.x = sx;
+          player.y = sy;
+          movedAny = true;
+          slid = true;
+          break;
+        }
       }
+      if (slid) break;
     }
+
+    if (!slid) break;
   }
 
-  // Last resort: allow a tiny perpendicular nudge only.
-  for (const p of perpendiculars) {
-    const sx = player.x + p.ox * speed * 0.55;
-    const sy = player.y + p.oy * speed * 0.55;
-
-    if (canPlayerMoveTo(sx, sy)) {
-      player.x = sx;
-      player.y = sy;
-      return true;
-    }
-  }
-
-  return false;
+  return movedAny;
 }
 
 function movePlayer() {
@@ -2175,22 +2198,22 @@ function drawCampfireLight() {
 
   // Ver.0.4-final: a little brighter and wider; still uneven, not a circular spotlight.
   groundGlow(0, 3, 1.90, 0.78, TILE * 2.70, [
-    [0, `rgba(255,188,72,${0.34 * flicker})`],
-    [0.32, `rgba(235,132,48,${0.195 * flicker})`],
-    [0.70, `rgba(172,75,28,${0.074 * flicker})`],
-    [1, "rgba(172,75,28,0)"]
+    [0, `rgba(255,214,142,${0.25 * flicker})`],
+    [0.32, `rgba(238,174,96,${0.135 * flicker})`],
+    [0.70, `rgba(190,126,72,${0.048 * flicker})`],
+    [1, "rgba(190,126,72,0)"]
   ]);
 
   groundGlow(-6, 1, 1.18, 0.60, TILE * 1.48, [
-    [0, `rgba(255,210,112,${0.22 * flicker})`],
-    [0.55, `rgba(226,118,45,${0.078 * flicker})`],
-    [1, "rgba(226,118,45,0)"]
+    [0, `rgba(255,226,170,${0.16 * flicker})`],
+    [0.55, `rgba(230,166,96,${0.050 * flicker})`],
+    [1, "rgba(230,166,96,0)"]
   ], 0.90);
 
   groundGlow(7, 6, 1.10, 0.54, TILE * 1.28, [
-    [0, `rgba(244,143,52,${0.145 * flicker})`],
-    [0.65, `rgba(190,80,35,${0.054 * flicker})`],
-    [1, "rgba(190,80,35,0)"]
+    [0, `rgba(246,190,120,${0.10 * flicker})`],
+    [0.65, `rgba(198,136,82,${0.035 * flicker})`],
+    [1, "rgba(198,136,82,0)"]
   ], 0.80);
 
   ctx.restore();
@@ -2648,11 +2671,11 @@ function drawNightObjectVeil(now) {
   ctx.save();
 
   // A cool gray-blue veil lowers saturation without making the whole scene too black.
-  ctx.fillStyle = isNight ? "rgba(18,24,32,0.22)" : "rgba(22,26,32,0.10)";
+  ctx.fillStyle = isNight ? "rgba(18,22,28,0.10)" : "rgba(22,24,28,0.04)";
   ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
 
   // A second very faint neutral veil flattens remaining vivid colors.
-  ctx.fillStyle = isNight ? "rgba(40,40,42,0.08)" : "rgba(40,40,42,0.03)";
+  ctx.fillStyle = isNight ? "rgba(42,42,44,0.04)" : "rgba(42,42,44,0.02)";
   ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
 
   ctx.restore();
@@ -2675,23 +2698,8 @@ function drawNightOverlay(now) {
 }
 
 function drawAll(now) {
-  const sun = getSunIndex(now);
-  const isNight = sun === 5 || sun === 6 || sun === 7;
-  const isDuskOrDawn = sun === 4 || sun === 0;
-
   ctx.save();
   ctx.scale(camera.zoom, camera.zoom);
-
-  // Ver.0.4-L:
-  // Desaturate the whole world itself, not just by putting a dark veil over it.
-  // CampfireLight is drawn after filter reset, so the fire area keeps warmth.
-  if (isNight) {
-    ctx.filter = "saturate(18%) brightness(88%)";
-  } else if (isDuskOrDawn) {
-    ctx.filter = "saturate(52%) brightness(96%)";
-  } else {
-    ctx.filter = "none";
-  }
 
   drawGround(now);
   drawNightOverlay(now);
@@ -2709,7 +2717,11 @@ function drawAll(now) {
   drawCampfire();
   drawPlayer();
 
-  ctx.filter = "none";
+  // Ver.0.4-M:
+  // Desaturate the rendered world by laying a grayscale copy over it.
+  // This is more reliable than ctx.filter on all Safari / Canvas paths.
+  drawNightDesaturationLayer(now);
+
   drawNightObjectVeil(now);
   drawCampfireLight();
 
@@ -2722,6 +2734,33 @@ function drawAll(now) {
   if (game.debug) {
     drawDebug(now);
   }
+}
+
+function drawNightDesaturationLayer(now) {
+  const sun = getSunIndex(now);
+  const isNight = sun === 5 || sun === 6 || sun === 7;
+  const isDuskOrDawn = sun === 4 || sun === 0;
+
+  if (!isNight && !isDuskOrDawn) return;
+
+  const w = screen.w / camera.zoom;
+  const h = screen.h / camera.zoom;
+  const alpha = isNight ? 0.78 : 0.42;
+
+  ctx.save();
+
+  // A near-neutral blue-gray layer using saturation blend mode pulls color out
+  // while preserving value contrast.
+  ctx.globalCompositeOperation = "saturation";
+  ctx.fillStyle = `rgba(150,150,150,${alpha})`;
+  ctx.fillRect(0, 0, w, h);
+
+  // Cool the result slightly so night does not become flat monochrome.
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = isNight ? "rgba(12,18,28,0.18)" : "rgba(14,18,24,0.08)";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.restore();
 }
 
 function generateInscription() {
