@@ -1390,6 +1390,64 @@ function canPlayerMoveTo(px, py) {
   return isLandTile(tx, ty) && !isBlockedTile(tx, ty);
 }
 
+function tryMoveWithSlide(dirX, dirY, speed) {
+  const nextX = player.x + dirX * speed;
+  const nextY = player.y + dirY * speed;
+
+  if (canPlayerMoveTo(nextX, nextY)) {
+    player.x = nextX;
+    player.y = nextY;
+    return true;
+  }
+
+  // First, try normal axis sliding.
+  let moved = false;
+  if (canPlayerMoveTo(nextX, player.y)) {
+    player.x = nextX;
+    moved = true;
+  }
+  if (canPlayerMoveTo(player.x, nextY)) {
+    player.y = nextY;
+    moved = true;
+  }
+  if (moved) return true;
+
+  // Then, when pushing into a trunk/corner head-on, softly search nearby
+  // perpendicular offsets so the character rounds the obstacle instead of sticking.
+  const perpendiculars = Math.abs(dirX) >= Math.abs(dirY)
+    ? [{ ox: 0, oy: -1 }, { ox: 0, oy: 1 }]
+    : [{ ox: -1, oy: 0 }, { ox: 1, oy: 0 }];
+
+  const slideSteps = [0.45, 0.75, 1.05, 1.35];
+
+  for (const step of slideSteps) {
+    for (const p of perpendiculars) {
+      const sx = player.x + dirX * speed * 0.62 + p.ox * speed * step;
+      const sy = player.y + dirY * speed * 0.62 + p.oy * speed * step;
+
+      if (canPlayerMoveTo(sx, sy)) {
+        player.x = sx;
+        player.y = sy;
+        return true;
+      }
+    }
+  }
+
+  // Last resort: allow a tiny perpendicular nudge only.
+  for (const p of perpendiculars) {
+    const sx = player.x + p.ox * speed * 0.55;
+    const sy = player.y + p.oy * speed * 0.55;
+
+    if (canPlayerMoveTo(sx, sy)) {
+      player.x = sx;
+      player.y = sy;
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function movePlayer() {
   if (game.paused) return;
 
@@ -1416,18 +1474,7 @@ function movePlayer() {
   dirX /= len;
   dirY /= len;
 
-  const currentSpeed = getPlayerSpeed();
-  const nextX = player.x + dirX * currentSpeed;
-  const nextY = player.y + dirY * currentSpeed;
-
-  // Slide along tree trunks and other blocking objects instead of sticking.
-  if (canPlayerMoveTo(nextX, nextY)) {
-    player.x = nextX;
-    player.y = nextY;
-  } else {
-    if (canPlayerMoveTo(nextX, player.y)) player.x = nextX;
-    if (canPlayerMoveTo(player.x, nextY)) player.y = nextY;
-  }
+  tryMoveWithSlide(dirX, dirY, getPlayerSpeed());
 
   player.x = Math.max(0, Math.min(MAP_W * TILE - player.w, player.x));
   player.y = Math.max(0, Math.min(MAP_H * TILE - player.h, player.y));
@@ -2601,11 +2648,11 @@ function drawNightObjectVeil(now) {
   ctx.save();
 
   // A cool gray-blue veil lowers saturation without making the whole scene too black.
-  ctx.fillStyle = isNight ? "rgba(24,31,40,0.44)" : "rgba(26,30,36,0.20)";
+  ctx.fillStyle = isNight ? "rgba(18,24,32,0.22)" : "rgba(22,26,32,0.10)";
   ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
 
   // A second very faint neutral veil flattens remaining vivid colors.
-  ctx.fillStyle = isNight ? "rgba(42,42,42,0.16)" : "rgba(42,42,42,0.06)";
+  ctx.fillStyle = isNight ? "rgba(40,40,42,0.08)" : "rgba(40,40,42,0.03)";
   ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
 
   ctx.restore();
@@ -2616,20 +2663,35 @@ function drawNightOverlay(now) {
 
   if (sun === 5 || sun === 6 || sun === 7) {
     // Ver.0.4-K: slightly readable night; saturation is handled by drawNightObjectVeil.
-    ctx.fillStyle = "rgba(8,13,20,0.28)";
+    ctx.fillStyle = "rgba(8,13,20,0.18)";
     ctx.fillRect(0, 0, screen.w, screen.h);
   }
 
   if (sun === 4 || sun === 0) {
     // Evening / morning: less dark, already low-saturation.
-    ctx.fillStyle = "rgba(10,14,20,0.12)";
+    ctx.fillStyle = "rgba(10,14,20,0.08)";
     ctx.fillRect(0, 0, screen.w, screen.h);
   }
 }
 
 function drawAll(now) {
+  const sun = getSunIndex(now);
+  const isNight = sun === 5 || sun === 6 || sun === 7;
+  const isDuskOrDawn = sun === 4 || sun === 0;
+
   ctx.save();
   ctx.scale(camera.zoom, camera.zoom);
+
+  // Ver.0.4-L:
+  // Desaturate the whole world itself, not just by putting a dark veil over it.
+  // CampfireLight is drawn after filter reset, so the fire area keeps warmth.
+  if (isNight) {
+    ctx.filter = "saturate(18%) brightness(88%)";
+  } else if (isDuskOrDawn) {
+    ctx.filter = "saturate(52%) brightness(96%)";
+  } else {
+    ctx.filter = "none";
+  }
 
   drawGround(now);
   drawNightOverlay(now);
@@ -2646,6 +2708,8 @@ function drawAll(now) {
   drawCampfireSmoke(now);
   drawCampfire();
   drawPlayer();
+
+  ctx.filter = "none";
   drawNightObjectVeil(now);
   drawCampfireLight();
 
