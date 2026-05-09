@@ -43,12 +43,53 @@ function resizeCanvas() {
 
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
+prepareFullscreenSurface();
+
+
+function prepareFullscreenSurface() {
+  // iPhone Safari does not support true arbitrary-element fullscreen reliably,
+  // but these settings reduce accidental scrolling and keep the canvas occupying the viewport.
+  document.documentElement.style.margin = "0";
+  document.documentElement.style.padding = "0";
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.margin = "0";
+  document.body.style.padding = "0";
+  document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.inset = "0";
+  canvas.style.display = "block";
+  canvas.style.width = "100vw";
+  canvas.style.height = "100vh";
+  canvas.style.touchAction = "none";
+}
+
+function requestFullscreenIfPossible() {
+  if (game.fullscreenRequested) return;
+  game.fullscreenRequested = true;
+  prepareFullscreenSurface();
+
+  const target = document.documentElement;
+  const request = target.requestFullscreen || target.webkitRequestFullscreen || canvas.requestFullscreen || canvas.webkitRequestFullscreen;
+
+  if (request) {
+    try {
+      const result = request.call(target);
+      if (result && typeof result.catch === "function") result.catch(() => {});
+    } catch (_) {
+      // unsupported environments simply keep the fixed full-viewport canvas.
+    }
+  }
+
+  setTimeout(resizeCanvas, 120);
+}
+
 
 const game = {
   startedAt: performance.now(),
   lastTime: performance.now(),
   paused: false,
   debug: false,
+  fullscreenRequested: false,
 
   externalWind: "breeze",
   activeWind: "none",
@@ -119,7 +160,8 @@ const player = {
   y: 26 * TILE,
   w: 24,
   h: 24,
-  speed: 2.2
+  speed: 1.47,
+  blinkSeed: Math.random() * 1000
 };
 
 const camera = {
@@ -1342,6 +1384,12 @@ function actStone() {
   game.endingShown = true;
 }
 
+function canPlayerMoveTo(px, py) {
+  const tx = Math.floor((px + player.w / 2) / TILE);
+  const ty = Math.floor((py + player.h / 2) / TILE);
+  return isLandTile(tx, ty) && !isBlockedTile(tx, ty);
+}
+
 function movePlayer() {
   if (game.paused) return;
 
@@ -1372,12 +1420,13 @@ function movePlayer() {
   const nextX = player.x + dirX * currentSpeed;
   const nextY = player.y + dirY * currentSpeed;
 
-  const nextTx = Math.floor((nextX + player.w / 2) / TILE);
-  const nextTy = Math.floor((nextY + player.h / 2) / TILE);
-
-  if (isLandTile(nextTx, nextTy) && !isBlockedTile(nextTx, nextTy)) {
+  // Slide along tree trunks and other blocking objects instead of sticking.
+  if (canPlayerMoveTo(nextX, nextY)) {
     player.x = nextX;
     player.y = nextY;
+  } else {
+    if (canPlayerMoveTo(nextX, player.y)) player.x = nextX;
+    if (canPlayerMoveTo(player.x, nextY)) player.y = nextY;
   }
 
   player.x = Math.max(0, Math.min(MAP_W * TILE - player.w, player.x));
@@ -2325,13 +2374,23 @@ function drawCampfireSmoke(now) {
 function drawPlayer() {
   const x = player.x - camera.x;
   const y = player.y - camera.y;
+  const now = performance.now();
 
   ctx.fillStyle = "#2f5e8f";
   ctx.fillRect(x, y, player.w, player.h);
 
+  // Occasional blink: mostly open, briefly closed.
+  const blinkCycle = (now / 1000 + player.blinkSeed) % 4.8;
+  const blinking = blinkCycle > 4.58;
+
   ctx.fillStyle = "#fff";
-  ctx.fillRect(x + 6, y + 7, 4, 4);
-  ctx.fillRect(x + 15, y + 7, 4, 4);
+  if (blinking) {
+    ctx.fillRect(x + 6, y + 9, 4, 1);
+    ctx.fillRect(x + 15, y + 9, 4, 1);
+  } else {
+    ctx.fillRect(x + 6, y + 7, 4, 4);
+    ctx.fillRect(x + 15, y + 7, 4, 4);
+  }
 }
 
 function drawVirtualStick() {
@@ -2358,15 +2417,14 @@ function drawVirtualStick() {
 }
 
 function getInventoryLayout() {
-  const slotSize = 54;
-  const gap = 10;
-  const totalW = slotSize * 3 + gap * 2;
-  const startX = (screen.w - totalW) / 2;
-  const y = screen.h - 78;
+  const pocketW = 178;
+  const pocketH = 58;
+  const startX = (screen.w - pocketW) / 2;
+  const y = screen.h - pocketH - 18;
 
   return {
-    slotSize,
-    gap,
+    pocketW,
+    pocketH,
     startX,
     y
   };
@@ -2375,78 +2433,103 @@ function getInventoryLayout() {
 function getInventorySlotAtScreen(x, y) {
   const layout = getInventoryLayout();
 
-  for (let i = 0; i < 3; i++) {
-    const sx = layout.startX + i * (layout.slotSize + layout.gap);
-    const sy = layout.y;
-
-    if (
-      x >= sx &&
-      x <= sx + layout.slotSize &&
-      y >= sy &&
-      y <= sy + layout.slotSize
-    ) {
-      return i;
-    }
+  if (
+    x >= layout.startX &&
+    x <= layout.startX + layout.pocketW &&
+    y >= layout.y &&
+    y <= layout.y + layout.pocketH
+  ) {
+    const firstItemIndex = inventory.slots.findIndex(slot => slot !== null);
+    return firstItemIndex === -1 ? 0 : firstItemIndex;
   }
 
   return -1;
 }
 
-function drawInventory() {
-  const layout = getInventoryLayout();
+function drawPocketItem(item, cx, cy) {
+  if (!item) return;
 
-  for (let i = 0; i < 3; i++) {
-    const x = layout.startX + i * (layout.slotSize + layout.gap);
-    const y = layout.y;
-    const item = inventory.slots[i];
-
-    ctx.globalAlpha = 0.74;
-    ctx.fillStyle = "#111";
-    ctx.fillRect(x, y, layout.slotSize, layout.slotSize);
-
-    ctx.globalAlpha = 0.38;
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 1, y + 1, layout.slotSize - 2, layout.slotSize - 2);
-
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "rgba(255,255,255,0.72)";
-    ctx.font = "11px system-ui";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(String(i + 7), x + 5, y + 4);
-
-    if (item) {
-      ctx.font = "25px system-ui";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      if (item.kind === "sandwich") {
-        ctx.fillText("🥪", x + layout.slotSize / 2, y + layout.slotSize / 2 + 2);
-      }
-
-      if (item.kind === "petal") {
-        const color = flowerColors[item.color] || flowerColors.red;
-        ctx.fillStyle = color.petal;
-        ctx.beginPath();
-        ctx.ellipse(x + layout.slotSize / 2, y + layout.slotSize / 2 + 2, 10, 7, -0.45, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (item.kind === "fragment") {
-        ctx.fillStyle = "rgba(210,225,222,0.82)";
-        ctx.beginPath();
-        ctx.ellipse(x + layout.slotSize / 2, y + layout.slotSize / 2 + 2, 11, 8, -0.35, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(255,255,245,0.18)";
-        ctx.fillRect(x + layout.slotSize / 2 - 3, y + layout.slotSize / 2 - 3, 3, 3);
-      }
-    }
+  if (item.kind === "sandwich") {
+    ctx.font = "24px system-ui";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("🥪", cx, cy + 1);
+    return;
   }
 
+  if (item.kind === "petal") {
+    const color = flowerColors[item.color] || flowerColors.red;
+    ctx.fillStyle = color.petal;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 1, 10, 7, -0.45, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (item.kind === "fragment") {
+    ctx.fillStyle = "rgba(210,225,222,0.78)";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 1, 11, 8, -0.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,245,0.16)";
+    ctx.fillRect(cx - 3, cy - 4, 3, 3);
+  }
+}
+
+function drawInventory() {
+  const layout = getInventoryLayout();
+  const x = layout.startX;
+  const y = layout.y;
+  const w = layout.pocketW;
+  const h = layout.pocketH;
+
+  ctx.save();
+  ctx.globalAlpha = 0.70;
+  ctx.fillStyle = "rgba(16,17,16,0.82)";
+  roundRect(ctx, x, y, w, h, 14);
+  ctx.fill();
+
+  ctx.globalAlpha = 0.42;
+  ctx.strokeStyle = "rgba(230,220,190,0.75)";
+  ctx.lineWidth = 2;
+  roundRect(ctx, x + 1, y + 1, w - 2, h - 2, 13);
+  ctx.stroke();
+
+  ctx.globalAlpha = 0.18;
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 18, y + 12);
+  ctx.quadraticCurveTo(x + w / 2, y + 22, x + w - 18, y + 12);
+  ctx.stroke();
+
   ctx.globalAlpha = 1;
+  const items = inventory.slots.filter(Boolean);
+  const positions = items.length <= 1
+    ? [x + w / 2]
+    : items.length === 2
+      ? [x + w / 2 - 24, x + w / 2 + 24]
+      : [x + w / 2 - 42, x + w / 2, x + w / 2 + 42];
+
+  items.forEach((item, i) => drawPocketItem(item, positions[i], y + h / 2 + 2));
+
+  ctx.restore();
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
 }
 
 function drawMessage() {
@@ -2741,6 +2824,7 @@ function getTouchPos(e) {
 }
 
 window.addEventListener("keydown", e => {
+  requestFullscreenIfPossible();
   const key = e.key.toLowerCase();
 
   if (e.key === "F2") {
@@ -2807,6 +2891,7 @@ window.addEventListener("keyup", e => {
 
 canvas.addEventListener("touchstart", e => {
   e.preventDefault();
+  requestFullscreenIfPossible();
   if (game.paused) return;
 
   const pos = getTouchPos(e);
