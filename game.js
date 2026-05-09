@@ -1021,7 +1021,7 @@ function registerForceAction() {
 function getPlayerSpeed() {
   let speed = player.speed;
 
-  if (game.hunger === 0) speed = player.speed / 3;
+  if (game.hunger === 0) speed = player.speed / 2;
   else if (game.hunger === 25) speed = player.speed * 2 / 3;
 
   const p = playerTile();
@@ -2420,7 +2420,7 @@ function getInventoryLayout() {
   const pocketW = 178;
   const pocketH = 58;
   const startX = (screen.w - pocketW) / 2;
-  const y = screen.h - pocketH - 18;
+  const y = screen.h - pocketH - 54;
 
   return {
     pocketW,
@@ -2599,7 +2599,7 @@ function drawNightObjectVeil(now) {
   // The previous destination-out mask made a large green spotlight.
   // Night simply darkens objects; campfireLight then adds a small warm pool.
   ctx.save();
-  ctx.fillStyle = isNight ? "rgba(3,8,18,0.58)" : "rgba(8,14,22,0.22)";
+  ctx.fillStyle = isNight ? "rgba(18,22,28,0.22)" : "rgba(18,20,24,0.10)";
   ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
   ctx.restore();
 }
@@ -2609,13 +2609,13 @@ function drawNightOverlay(now) {
 
   if (sun === 5 || sun === 6 || sun === 7) {
     // Ver.0.3-C: one step darker than 0.3-B.
-    ctx.fillStyle = "rgba(3,8,18,0.72)";
+    ctx.fillStyle = "rgba(10,16,24,0.34)";
     ctx.fillRect(0, 0, screen.w, screen.h);
   }
 
   if (sun === 4 || sun === 0) {
     // Evening / morning are dimmer too, but not fully night.
-    ctx.fillStyle = "rgba(8,14,22,0.24)";
+    ctx.fillStyle = "rgba(12,16,22,0.14)";
     ctx.fillRect(0, 0, screen.w, screen.h);
   }
 }
@@ -2636,11 +2636,11 @@ function drawAll(now) {
   drawDoor();
   drawStone();
   drawTrees(now);
-  drawNightObjectVeil(now);
-  drawCampfireLight();
   drawCampfireSmoke(now);
   drawCampfire();
   drawPlayer();
+  drawNightObjectVeil(now);
+  drawCampfireLight();
 
   ctx.restore();
 
@@ -2822,9 +2822,25 @@ function getTouchPos(e) {
   const t = e.touches[0] || e.changedTouches[0];
   return { x: t.clientX, y: t.clientY };
 }
+function resetMovementInput() {
+  input.keys.up = false;
+  input.keys.down = false;
+  input.keys.left = false;
+  input.keys.right = false;
+  input.moveActive = false;
+  input.dx = 0;
+  input.dy = 0;
+}
+
+window.addEventListener("blur", resetMovementInput);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) resetMovementInput();
+});
+document.addEventListener("fullscreenchange", resetMovementInput);
+document.addEventListener("webkitfullscreenchange", resetMovementInput);
+
 
 window.addEventListener("keydown", e => {
-  requestFullscreenIfPossible();
   const key = e.key.toLowerCase();
 
   if (e.key === "F2") {
@@ -2834,6 +2850,9 @@ window.addEventListener("keydown", e => {
     }
     return;
   }
+
+  const isMoveKey = e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight" || key === "w" || key === "a" || key === "s" || key === "d";
+  if (isMoveKey) e.preventDefault();
 
   if (e.key === "ArrowUp" || key === "w") {
     input.keys.up = true;
@@ -2891,7 +2910,6 @@ window.addEventListener("keyup", e => {
 
 canvas.addEventListener("touchstart", e => {
   e.preventDefault();
-  requestFullscreenIfPossible();
   if (game.paused) return;
 
   const pos = getTouchPos(e);
