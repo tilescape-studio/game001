@@ -1410,9 +1410,10 @@ function canPlayerMoveTo(px, py) {
 }
 
 function tryMoveWithSlide(dirX, dirY, speed) {
-  // Sub-step movement. This keeps the auto-slide alive even at low speed and
-  // prevents jumping from one side of a trunk collision to a stuck state.
-  const steps = Math.max(1, Math.ceil(speed / 0.65));
+  // Ver.0.4-N:
+  // Smoother collision sliding. Avoid the previous strong perpendicular nudges
+  // that caused a visible "gaku-gaku" bounce when first touching a trunk.
+  const steps = Math.max(1, Math.ceil(speed / 0.5));
   const stepSpeed = speed / steps;
 
   let movedAny = false;
@@ -1428,44 +1429,53 @@ function tryMoveWithSlide(dirX, dirY, speed) {
       continue;
     }
 
-    // Normal axis slide.
-    let moved = false;
-    if (canPlayerMoveTo(nextX, player.y)) {
-      player.x = nextX;
-      moved = true;
-    }
-    if (canPlayerMoveTo(player.x, nextY)) {
-      player.y = nextY;
-      moved = true;
-    }
-    if (moved) {
-      movedAny = true;
-      continue;
-    }
+    // Prefer the axis that matches the stronger input direction.
+    const axisAttempts = Math.abs(dirX) >= Math.abs(dirY)
+      ? [
+          { x: player.x + dirX * stepSpeed, y: player.y },
+          { x: player.x, y: player.y + dirY * stepSpeed }
+        ]
+      : [
+          { x: player.x, y: player.y + dirY * stepSpeed },
+          { x: player.x + dirX * stepSpeed, y: player.y }
+        ];
 
-    // Head-on trunk/corner push: search both perpendicular directions.
+    let moved = false;
+    for (const attempt of axisAttempts) {
+      if (canPlayerMoveTo(attempt.x, attempt.y)) {
+        player.x = attempt.x;
+        player.y = attempt.y;
+        moved = true;
+        movedAny = true;
+        break;
+      }
+    }
+    if (moved) continue;
+
+    // Gentle edge rounding only. Very small perpendicular nudges prevent sticking
+    // without snapping the player sideways.
     const perpendiculars = Math.abs(dirX) >= Math.abs(dirY)
       ? [{ ox: 0, oy: -1 }, { ox: 0, oy: 1 }]
       : [{ ox: -1, oy: 0 }, { ox: 1, oy: 0 }];
 
-    let slid = false;
-    for (const amount of [0.65, 1.05, 1.45, 1.85, 2.30]) {
+    let nudged = false;
+    for (const amount of [0.25, 0.40, 0.55]) {
       for (const p of perpendiculars) {
-        const sx = player.x + dirX * stepSpeed * 0.35 + p.ox * stepSpeed * amount;
-        const sy = player.y + dirY * stepSpeed * 0.35 + p.oy * stepSpeed * amount;
+        const sx = player.x + p.ox * stepSpeed * amount;
+        const sy = player.y + p.oy * stepSpeed * amount;
 
         if (canPlayerMoveTo(sx, sy)) {
           player.x = sx;
           player.y = sy;
+          nudged = true;
           movedAny = true;
-          slid = true;
           break;
         }
       }
-      if (slid) break;
+      if (nudged) break;
     }
 
-    if (!slid) break;
+    if (!nudged) break;
   }
 
   return movedAny;
@@ -2745,7 +2755,15 @@ function drawNightDesaturationLayer(now) {
 
   const w = screen.w / camera.zoom;
   const h = screen.h / camera.zoom;
-  const alpha = isNight ? 0.78 : 0.42;
+  let alpha = 0;
+
+  if (isNight) {
+    alpha = 0.60;
+  } else if (isDuskOrDawn) {
+    alpha = 0.45;
+  } else {
+    alpha = 0.30;
+  }
 
   ctx.save();
 
@@ -2757,7 +2775,7 @@ function drawNightDesaturationLayer(now) {
 
   // Cool the result slightly so night does not become flat monochrome.
   ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = isNight ? "rgba(12,18,28,0.18)" : "rgba(14,18,24,0.08)";
+  ctx.fillStyle = isNight ? "rgba(12,18,28,0.13)" : "rgba(14,18,24,0.06)";
   ctx.fillRect(0, 0, w, h);
 
   ctx.restore();
