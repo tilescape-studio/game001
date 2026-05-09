@@ -2594,13 +2594,20 @@ function drawNightObjectVeil(now) {
 
   if (!isNight && !isDuskOrDawn) return;
 
-  // Ver.0.4-F:
-  // Do not cut a circular transparent hole around the campfire.
-  // The previous destination-out mask made a large green spotlight.
-  // Night simply darkens objects; campfireLight then adds a small warm pool.
+  // Ver.0.4-K:
+  // Stronger desaturation at night. Keep the world readable, but pull color out
+  // from trees / grass / flowers / sea / player. CampfireLight is drawn after this,
+  // so the area around the fire regains a little warmth.
   ctx.save();
-  ctx.fillStyle = isNight ? "rgba(18,22,28,0.22)" : "rgba(18,20,24,0.10)";
+
+  // A cool gray-blue veil lowers saturation without making the whole scene too black.
+  ctx.fillStyle = isNight ? "rgba(24,31,40,0.44)" : "rgba(26,30,36,0.20)";
   ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
+
+  // A second very faint neutral veil flattens remaining vivid colors.
+  ctx.fillStyle = isNight ? "rgba(42,42,42,0.16)" : "rgba(42,42,42,0.06)";
+  ctx.fillRect(0, 0, screen.w / camera.zoom, screen.h / camera.zoom);
+
   ctx.restore();
 }
 
@@ -2608,14 +2615,14 @@ function drawNightOverlay(now) {
   const sun = getSunIndex(now);
 
   if (sun === 5 || sun === 6 || sun === 7) {
-    // Ver.0.3-C: one step darker than 0.3-B.
-    ctx.fillStyle = "rgba(10,16,24,0.34)";
+    // Ver.0.4-K: slightly readable night; saturation is handled by drawNightObjectVeil.
+    ctx.fillStyle = "rgba(8,13,20,0.28)";
     ctx.fillRect(0, 0, screen.w, screen.h);
   }
 
   if (sun === 4 || sun === 0) {
-    // Evening / morning are dimmer too, but not fully night.
-    ctx.fillStyle = "rgba(12,16,22,0.14)";
+    // Evening / morning: less dark, already low-saturation.
+    ctx.fillStyle = "rgba(10,14,20,0.12)";
     ctx.fillRect(0, 0, screen.w, screen.h);
   }
 }
